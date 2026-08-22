@@ -1,27 +1,116 @@
+import type {
+  Application,
+  Candidate,
+  Dossier,
+  GrowthPlan,
+  Integration,
+  Job,
+  NetworkingEvent,
+  OutreachDraft,
+  OutreachThread,
+  Overview,
+} from "@/lib/types";
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-    cache: "no-store",
-  });
+export class ApiError extends Error {
+  readonly status: number;
 
-  if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}`);
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
   }
-
-  return response.json() as Promise<T>;
 }
 
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...init,
+      headers: {
+        ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        ...(init?.headers ?? {}),
+      },
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(0, `Cannot reach the Matchr backend at ${API_URL}. Is it running?`);
+  }
+
+  if (!response.ok) {
+    throw new ApiError(response.status, await readError(response));
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+  return (await response.json()) as T;
+}
+
+async function readError(response: Response): Promise<string> {
+  try {
+    const payload = await response.json();
+    if (typeof payload?.detail === "string") return payload.detail;
+    if (Array.isArray(payload?.detail)) {
+      return payload.detail.map((item: { msg?: string }) => item.msg ?? "Invalid input").join("; ");
+    }
+  } catch {
+    // Fall through to the status text.
+  }
+  return `${response.status} ${response.statusText}`;
+}
+
+const post = <T,>(path: string, body?: unknown) =>
+  request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
+
 export const api = {
-  health: () => request<{ status: string }>("/api/health"),
-  me: () => request("/api/candidates/me"),
-  jobMatches: () => request("/api/jobs/matches"),
-  growthPlan: () => request("/api/growth/plan"),
-  eventMatches: () => request("/api/events/matches"),
-  integrations: () => request("/api/integrations"),
+  overview: () => request<Overview>("/api/overview"),
+
+  me: () => request<Candidate>("/api/candidates/me"),
+  updateMe: (payload: Partial<Pick<Candidate, "target_title" | "location" | "headline" | "summary">>) =>
+    request<Candidate>("/api/candidates/me", { method: "PATCH", body: JSON.stringify(payload) }),
+  connectLinkedin: () => post<Candidate>("/api/candidates/linkedin"),
+  uploadResume: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return request<Candidate>("/api/candidates/resume", { method: "POST", body: form });
+  },
+  resetProfile: () => post<Candidate>("/api/candidates/reset"),
+
+  jobMatches: (limit = 10) => request<Job[]>(`/api/jobs/matches?limit=${limit}`),
+  job: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
+  syncJobs: () => post<{ synced: number; at: string }>("/api/jobs/sync"),
+
+  applications: () => request<Application[]>("/api/applications"),
+  targetJob: (jobId: string) => post<Application>("/api/applications", { job_id: jobId }),
+  untargetJob: (jobId: string) =>
+    request<void>(`/api/applications/${jobId}`, { method: "DELETE" }),
+
+  growthPlan: () => request<GrowthPlan>("/api/growth/plan"),
+
+  eventMatches: (limit = 8) => request<NetworkingEvent[]>(`/api/events/matches?limit=${limit}`),
+  saveEvent: (eventId: string, saved: boolean) =>
+    post<NetworkingEvent[]>(`/api/events/${eventId}/save`, { saved }),
+
+  generateDossier: (jobId: string) => post<Dossier>(`/api/dossier/${jobId}`),
+  dossier: (jobId: string) => request<Dossier>(`/api/dossier/${jobId}`),
+
+  draftOutreach: (payload: {
+    recipient_email: string;
+    recipient_name?: string;
+    job_id?: string;
+    extra_context?: string;
+  }) => post<OutreachDraft>("/api/outreach/draft", payload),
+  sendOutreach: (payload: {
+    recipient_email: string;
+    subject: string;
+    body: string;
+    job_id?: string;
+  }) => post<OutreachThread>("/api/outreach/send", { ...payload, approved: true }),
+  threads: () => request<OutreachThread[]>("/api/outreach/threads"),
+
+  integrations: () => request<Integration[]>("/api/integrations"),
+  connectIntegration: (provider: string, connected: boolean) =>
+    post<Integration[]>(`/api/integrations/${provider}/connect`, { connected }),
 };

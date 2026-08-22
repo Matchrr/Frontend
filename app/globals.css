@@ -1,19 +1,200 @@
 @import "tailwindcss";
 
-:root {
-  --background: #fafafa;
-  --foreground: #09090b;
+/* ---------------------------------------------------------------------------
+   Design tokens
+   --------------------------------------------------------------------------- */
+
+@theme {
+  /* Brand — used for accents, active states, and the primary data series. */
+  --color-brand-50: #f1f2fe;
+  --color-brand-100: #e4e6fd;
+  --color-brand-200: #cdd0fb;
+  --color-brand-300: #adaff7;
+  --color-brand-400: #8b87f1;
+  --color-brand-500: #7566e8;
+  --color-brand-600: #6349da;
+  --color-brand-700: #553abf;
+  --color-brand-800: #46329a;
+  --color-brand-900: #3b2f7a;
+  --color-brand-950: #241c47;
+
+  /* Surfaces. The app is a light canvas with floating white panels. */
+  --color-canvas: #f4f4f5;
+  --color-surface: #ffffff;
+  --color-surface-muted: #fafafa;
+  --color-line: #e6e6e9;
+
+  --shadow-card: 0 1px 2px rgba(9, 9, 11, 0.04);
+  --shadow-panel:
+    0 1px 2px rgba(9, 9, 11, 0.04), 0 8px 24px -12px rgba(9, 9, 11, 0.12);
+  --shadow-pop:
+    0 4px 8px -2px rgba(9, 9, 11, 0.08), 0 12px 32px -8px rgba(9, 9, 11, 0.16);
+
+  --animate-reveal: reveal 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-reveal-left: reveal-left 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  --animate-fade: fade 400ms ease-out both;
+  --animate-wipe: wipe 900ms cubic-bezier(0.33, 1, 0.68, 1) both;
+  --animate-grow: grow 800ms cubic-bezier(0.33, 1, 0.68, 1) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-ping-soft: ping-soft 2s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
+/* ---------------------------------------------------------------------------
+   Motion
+   --------------------------------------------------------------------------- */
+
+@keyframes reveal {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 10px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes reveal-left {
+  from {
+    opacity: 0;
+    transform: translate3d(-8px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Left-to-right wipe used to draw charts in. Paired with transform-box so the
+   origin resolves against the element's own box inside an SVG. */
+@keyframes wipe {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes grow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes ping-soft {
+  75%,
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+.chart-wipe {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: var(--animate-wipe);
+}
+
+.bar-grow {
+  transform-box: fill-box;
+  transform-origin: bottom center;
+  animation: var(--animate-grow);
+}
+
+/* Skeletons read as loading surfaces rather than flat gray blocks. */
+.shimmer {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-zinc-100) 0%,
+    var(--color-zinc-100) 40%,
+    var(--color-zinc-50) 50%,
+    var(--color-zinc-100) 60%,
+    var(--color-zinc-100) 100%
+  );
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+/* One switch turns off every entrance animation in the app. Transitions are
+   left alone so hover and focus feedback still works. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    animation-delay: 0ms !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Base
+   --------------------------------------------------------------------------- */
+
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-canvas);
+  color: var(--color-zinc-950);
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: var(--color-brand-200);
+  color: var(--color-brand-950);
+}
+
+/* Numeric UI (counters, percentages, axis labels) should never reflow while
+   values animate. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+@supports (scrollbar-width: thin) {
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-zinc-300) transparent;
+  }
+}
+
+.scroll-slim::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: var(--color-zinc-300);
+  border-radius: 9999px;
+}
+
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
 }

@@ -18,8 +18,6 @@ Talks to the Backend at `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`).
 ## Run
 
 ```bash
-cp .env.example .env.local
-npm install
 npm run dev
 ```
 

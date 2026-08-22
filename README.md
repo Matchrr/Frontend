@@ -13,7 +13,7 @@ Next.js (App Router) + Tailwind dashboard for the Matchr career copilot.
 | `/outreach` | Gmail cold-email compose with AI draft |
 | `/dossier` | Tailored resume / cover letter export |
 
-Talks to the Backend at `NEXT_PUBLIC_API_URL` (default `http://localhost:8000`).
+Talks to the Backend at `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`).
 
 ## Run
 

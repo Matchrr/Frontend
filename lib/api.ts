@@ -71,6 +71,9 @@ export const api = {
   updateMe: (payload: Partial<Pick<Candidate, "target_title" | "location" | "headline" | "summary">>) =>
     request<Candidate>("/api/candidates/me", { method: "PATCH", body: JSON.stringify(payload) }),
   connectLinkedin: () => post<Candidate>("/api/candidates/linkedin"),
+  startLinkedinOAuth: () => request<{ url: string; configured: boolean; scopes: string[] }>(
+    "/api/integrations/linkedin/authorize",
+  ),
   uploadResume: (file: File) => {
     const form = new FormData();
     form.append("file", file);

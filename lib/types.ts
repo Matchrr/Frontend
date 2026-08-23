@@ -25,6 +25,7 @@ export type Experience = {
   company: string;
   start_date: string | null;
   end_date: string | null;
+  location: string | null;
   bullets: string[];
 };
 
@@ -35,13 +36,22 @@ export type Candidate = {
   summary: string | null;
   target_title: string | null;
   location: string | null;
+  email: string | null;
+  picture_url: string | null;
+  websites: string[];
   skills: string[];
   experience: Experience[];
   education: string[];
   certifications: string[];
+  volunteering: Experience[];
+  projects: string[];
+  languages: string[];
+  honors: string[];
   grounded: boolean;
   grounding_sources: string[];
   linkedin_connected: boolean;
+  linkedin_member_id: string | null;
+  linkedin_coverage: "none" | "identity" | "profile";
   gmail_connected: boolean;
 };
 
@@ -151,7 +161,8 @@ export type Integration = {
   direction: string;
   connected: boolean;
   configured: boolean;
-  description: string;
+  callback_url?: string | null;
+  connectable?: boolean;
 };
 
 export type ActivityKind =

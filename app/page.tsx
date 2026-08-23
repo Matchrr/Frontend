@@ -20,6 +20,7 @@ import {
   UserRound,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useProfile } from "@/components/ProfileProvider";
@@ -129,13 +130,13 @@ function ActionCard({
 const ONBOARDING_STEPS = [
   {
     icon: <Link2 className="h-4 w-4" />,
-    title: "Connect LinkedIn",
-    body: "Pulls headline, experience, skills, and education so you never fill out a profile form.",
+    title: "Sign in with LinkedIn",
+    body: "A short setup popup walks you through it. Matchr pulls identity immediately — or you can skip and start from a document.",
   },
   {
     icon: <Upload className="h-4 w-4" />,
-    title: "Or upload a resume",
-    body: "Text is extracted, parsed into structured history, and merged with whatever LinkedIn gave us.",
+    title: "LinkedIn PDF or resume",
+    body: "Choose which file to import, then drop it. Nutrient extracts experience, education, and skills into verified history.",
   },
   {
     icon: <Target className="h-4 w-4" />,
@@ -145,6 +146,7 @@ const ONBOARDING_STEPS = [
 ];
 
 function OnboardingHero({ overview }: { overview: Overview }) {
+  const router = useRouter();
   return (
     <div>
       <PageHeader
@@ -174,12 +176,10 @@ function OnboardingHero({ overview }: { overview: Overview }) {
                   ranked. They stay unscored until there is verified history to rank them against.
                 </p>
               </div>
-              <Link href="/profile">
-                <Button>
-                  Get grounded
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </Link>
+              <Button onClick={() => router.push("/profile?setup=1")}>
+                Get grounded
+                <ArrowRight className="h-4 w-4" />
+              </Button>
             </div>
           </div>
 

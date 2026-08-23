@@ -43,3 +43,31 @@ export function formatDateTime(iso: string | null | undefined): string | null {
 export function plural(count: number, singular: string, plural?: string): string {
   return count === 1 ? singular : (plural ?? `${singular}s`);
 }
+
+/** Strip school names Nutrient glues onto a home-base city. */
+export function homeCity(value: string | null | undefined): string {
+  if (!value) return "";
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!/\b(university|college|institute|polytechnic|academy)\b/i.test(text)) return text;
+  const parts = text.split(",").map((part) => part.trim()).filter(Boolean);
+  const region = parts.length >= 2 && /^([A-Z]{2}|[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)$/.test(parts.at(-1) ?? "")
+    ? parts.at(-1)!
+    : null;
+  const head = region ? parts.slice(0, -1) : parts;
+  const cityParts = head.filter((part) => !/\b(university|college|institute|polytechnic|academy)\b/i.test(part));
+  if (cityParts.length) {
+    const city = cityParts.join(", ");
+    return region ? `${city}, ${region}` : city;
+  }
+  const peeled = head
+    .join(" ")
+    .replace(
+      /^(?:[A-Z][a-z]+\s+)*(?:University|College|Institute|Polytechnic|Academy)(?:\s+of\s+[A-Z][a-z]+)?\s*/i,
+      "",
+    )
+    .replace(/^[,\s]+|[,\s]+$/g, "");
+  if (peeled && !/\b(university|college|institute|polytechnic|academy)\b/i.test(peeled)) {
+    return region ? `${peeled}, ${region}` : peeled;
+  }
+  return text;
+}

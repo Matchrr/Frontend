@@ -258,9 +258,18 @@ function SidebarContent({
             collapsed && "justify-center px-0",
           )}
         >
-          <span className="tnum flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">
-            {initials(candidate?.full_name)}
-          </span>
+          {candidate?.picture_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={candidate.picture_url}
+              alt=""
+              className="h-7 w-7 shrink-0 rounded-full object-cover"
+            />
+          ) : (
+            <span className="tnum flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">
+              {initials(candidate?.full_name)}
+            </span>
+          )}
           {collapsed ? null : (
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium text-zinc-900">

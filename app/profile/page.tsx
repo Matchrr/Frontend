@@ -3,13 +3,18 @@
 import {
   ArrowRight,
   Award,
+  BadgeCheck,
   Briefcase,
   Building2,
   CheckCircle2,
   FileUp,
+  FolderKanban,
+  Globe,
   GraduationCap,
+  HeartHandshake,
   Layers,
   Link2,
+  Mail,
   MapPin,
   RotateCcw,
   ShieldCheck,
@@ -18,8 +23,14 @@ import {
   Wrench,
 } from "lucide-react";
 import Link from "next/link";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
+import {
+  GroundingStatus,
+  GroundingWizard,
+  LINKEDIN_SKIP_KEY,
+  type WizardStep,
+} from "@/components/GroundingWizard";
 import { useProfile } from "@/components/ProfileProvider";
 import {
   Badge,
@@ -39,25 +50,81 @@ import {
   fieldClass,
 } from "@/components/ui";
 import { api } from "@/lib/api";
+import { homeCity } from "@/lib/format";
 import { useAsync } from "@/lib/useAsync";
+import type { Experience } from "@/lib/types";
 
 export default function ProfilePage() {
-  const { candidate, overview, loading, error, refresh } = useProfile();
-  const fileInput = useRef<HTMLInputElement>(null);
+  const { candidate, overview, initializing, error, refresh } = useProfile();
   const { data: integrations, reload: reloadIntegrations } = useAsync(() => api.integrations());
 
   const [busy, setBusy] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
-  const [dragging, setDragging] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [wizardStep, setWizardStep] = useState<WizardStep>(1);
+  const [linkedinSkipped, setLinkedinSkipped] = useState(false);
+  const urlHandled = useRef(false);
 
   // Edits override the fetched profile until they are saved, which keeps the
   // fields in sync with the server without an effect.
   const [edits, setEdits] = useState<{ targetTitle: string; location: string } | null>(null);
   const targetTitle = edits?.targetTitle ?? candidate?.target_title ?? "";
-  const location = edits?.location ?? candidate?.location ?? "";
+  const location = edits?.location ?? homeCity(candidate?.location);
   const setTargetTitle = (value: string) => setEdits({ targetTitle: value, location });
   const setLocation = (value: string) => setEdits({ targetTitle, location: value });
+
+  const linkedinStatus = integrations?.find((item) => item.provider === "linkedin");
+  const linkedinConfigured = linkedinStatus?.configured ?? false;
+  const nutrientStatus = integrations?.find((item) => item.provider === "nutrient");
+  const nutrientConfigured = nutrientStatus?.configured ?? false;
+  const linkedinCallback =
+    linkedinStatus?.callback_url ?? "http://localhost:4000/api/integrations/linkedin/callback";
+
+  useEffect(() => {
+    setLinkedinSkipped(window.sessionStorage.getItem(LINKEDIN_SKIP_KEY) === "1");
+  }, []);
+
+  useEffect(() => {
+    if (candidate?.linkedin_connected) {
+      window.sessionStorage.removeItem(LINKEDIN_SKIP_KEY);
+      setLinkedinSkipped(false);
+    }
+  }, [candidate?.linkedin_connected]);
+
+  useEffect(() => {
+    if (initializing || urlHandled.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const status = params.get("linkedin");
+    const setup = params.get("setup");
+    if (!status && !setup) {
+      urlHandled.current = true;
+      return;
+    }
+
+    urlHandled.current = true;
+    const reason = params.get("reason");
+    window.history.replaceState({}, "", "/profile");
+    const skipped = window.sessionStorage.getItem(LINKEDIN_SKIP_KEY) === "1";
+
+    if (status === "error") {
+      setActionError(reason || "LinkedIn sign-in did not complete.");
+      setWizardStep(1);
+      window.setTimeout(() => setWizardOpen(true), 180);
+      return;
+    }
+    if (status === "identity" || status === "imported") {
+      setWizardStep(2);
+      window.setTimeout(() => setWizardOpen(true), 180);
+      void refresh();
+      return;
+    }
+    if (setup === "1" && !candidate?.grounded) {
+      setWizardStep(candidate?.linkedin_connected || skipped ? 2 : 1);
+      window.setTimeout(() => setWizardOpen(true), 180);
+    }
+  }, [initializing, candidate, refresh]);
 
   async function run(label: string, action: () => Promise<unknown>) {
     setBusy(label);
@@ -72,6 +139,58 @@ export default function ProfilePage() {
     }
   }
 
+  async function connectLinkedin() {
+    setBusy("linkedin");
+    setActionError(null);
+    try {
+      if (linkedinConfigured) {
+        const { url } = await api.startLinkedinOAuth();
+        window.location.assign(url);
+        return;
+      }
+      await api.connectLinkedin();
+      await Promise.all([refresh(), reloadIntegrations()]);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "Something went wrong.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function uploadResume(file: File) {
+    setBusy("resume");
+    setActionError(null);
+    try {
+      await api.uploadResume(file);
+      await Promise.all([refresh(), reloadIntegrations()]);
+    } catch (cause) {
+      setActionError(cause instanceof Error ? cause.message : "Something went wrong.");
+      throw cause;
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function skipLinkedin() {
+    window.sessionStorage.setItem(LINKEDIN_SKIP_KEY, "1");
+    setLinkedinSkipped(true);
+  }
+
+  function openWizard(step: WizardStep) {
+    setActionError(null);
+    setWizardStep(step);
+    setWizardOpen(true);
+  }
+
+  const closeWizard = useCallback(() => {
+    setWizardOpen(false);
+  }, []);
+
+  const finishWizard = useCallback(() => {
+    setWizardOpen(false);
+    setNotice("Integration complete. Matching can now use your verified history.");
+  }, []);
+
   async function saveGoal() {
     await run("goal", () =>
       api.updateMe({ target_title: targetTitle.trim(), location: location.trim() }),
@@ -81,13 +200,13 @@ export default function ProfilePage() {
     window.setTimeout(() => setSaved(false), 2500);
   }
 
-  if (loading) {
+  if (initializing) {
     return (
       <div className="space-y-4">
         <Skeleton className="h-16 w-80" />
         <div className="grid gap-3 md:grid-cols-2">
-          <Skeleton className="h-52 w-full" />
-          <Skeleton className="h-52 w-full" />
+          <Skeleton className="h-24 w-full" />
+          <Skeleton className="h-24 w-full" />
         </div>
       </div>
     );
@@ -95,6 +214,10 @@ export default function ProfilePage() {
 
   const grounded = candidate?.grounded ?? false;
   const completeness = overview?.profile_completeness ?? 0;
+  const showProfile = Boolean(candidate && (grounded || candidate.linkedin_connected));
+  const identityOnly = Boolean(
+    candidate?.linkedin_connected && candidate.linkedin_coverage === "identity" && !grounded,
+  );
 
   return (
     <div>
@@ -114,16 +237,22 @@ export default function ProfilePage() {
         description={
           grounded
             ? "Every match, growth recommendation, and generated document may only cite the facts below. Nothing downstream can invent experience you have not listed."
-            : "Connect LinkedIn or upload a resume. Matchr extracts a verified career profile so you never fill out a form from scratch — and so no agent can hallucinate on your behalf."
+            : candidate?.linkedin_connected
+              ? "Identity imported. Upload a LinkedIn PDF or resume so matching can use your work history."
+              : "Connect LinkedIn or upload a resume. Matchr extracts a verified career profile so you never fill out a form from scratch — and so no agent can hallucinate on your behalf."
         }
         actions={
-          grounded ? (
+          grounded || candidate?.linkedin_connected ? (
             <Button
               variant="danger"
               size="sm"
               loading={busy === "reset"}
               disabled={busy !== null}
-              onClick={() => run("reset", api.resetProfile)}
+              onClick={() => {
+                window.sessionStorage.removeItem(LINKEDIN_SKIP_KEY);
+                setLinkedinSkipped(false);
+                void run("reset", api.resetProfile);
+              }}
             >
               <RotateCcw className="h-3.5 w-3.5" />
               Reset profile
@@ -137,99 +266,54 @@ export default function ProfilePage() {
           <ErrorNote message={error} />
         </div>
       ) : null}
-      {actionError ? (
+      {actionError && !wizardOpen ? (
         <div className="mb-4">
           <ErrorNote message={actionError} />
         </div>
       ) : null}
+      {notice ? (
+        <div className="mb-4">
+          <Callout tone="info" icon={<ShieldCheck className="h-4 w-4" />}>
+            {notice}
+          </Callout>
+        </div>
+      ) : null}
 
-      {/* Sources */}
-      <Stagger className="grid gap-3 md:grid-cols-2" start={40} childClassName="h-full">
-        <Card className="flex h-full flex-col p-5">
-          <SectionHeader
-            icon={<Link2 className="h-3.5 w-3.5" />}
-            tone="info"
-            title="LinkedIn"
-            description="Inbound only — nothing is ever posted"
-            action={
-              candidate?.linkedin_connected ? (
-                <Badge tone="positive" dot>
-                  Connected
-                </Badge>
-              ) : null
-            }
-          />
-          <p className="mt-3 flex-1 text-sm leading-6 text-zinc-600">
-            The fast path. Pulls headline, experience, skills, and education straight into your
-            profile — and you review everything before it becomes ground truth.
-          </p>
-          <div className="mt-4">
-            <Button
-              loading={busy === "linkedin"}
-              disabled={busy !== null}
-              onClick={() => run("linkedin", api.connectLinkedin)}
-            >
-              {candidate?.linkedin_connected ? "Re-import from LinkedIn" : "Connect LinkedIn"}
-            </Button>
-            <p className="mt-2 text-xs text-zinc-500">
-              OAuth is not wired up in this build, so this imports a representative profile.
-            </p>
-          </div>
-        </Card>
+      {/* Sources — compact status; the actual import happens in the wizard. */}
+      <Reveal delay={40}>
+        <GroundingStatus
+          linkedinConnected={Boolean(candidate?.linkedin_connected)}
+          linkedinSkipped={linkedinSkipped}
+          grounded={grounded}
+          sources={candidate?.grounding_sources ?? []}
+          onContinue={() => {
+            const next: WizardStep =
+              candidate?.linkedin_connected || linkedinSkipped ? 2 : 1;
+            if (next === 2 && !candidate?.linkedin_connected) skipLinkedin();
+            openWizard(next);
+          }}
+          onOpenStep={(step) => {
+            if (step === 2 && !candidate?.linkedin_connected) skipLinkedin();
+            openWizard(step);
+          }}
+        />
+      </Reveal>
 
-        <Card className="flex h-full flex-col p-5">
-          <SectionHeader
-            icon={<FileUp className="h-3.5 w-3.5" />}
-            tone="brand"
-            title="Resume upload"
-            description="Optional enrichment or override path"
-          />
-          <input
-            ref={fileInput}
-            type="file"
-            accept="application/pdf,text/plain,.txt,.md"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) void run("resume", () => api.uploadResume(file));
-              event.target.value = "";
-            }}
-          />
-          <button
-            type="button"
-            disabled={busy !== null}
-            onClick={() => fileInput.current?.click()}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragging(true);
-            }}
-            onDragLeave={() => setDragging(false)}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              const file = event.dataTransfer.files?.[0];
-              if (file) void run("resume", () => api.uploadResume(file));
-            }}
-            className={cx(
-              "mt-3 flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-7 text-center transition-colors",
-              dragging
-                ? "border-brand-400 bg-brand-50/60"
-                : "border-zinc-300 hover:border-zinc-400 hover:bg-zinc-50",
-              busy !== null && "cursor-not-allowed opacity-60",
-            )}
-          >
-            <IconTile tone={dragging ? "brand" : "neutral"} size="lg">
-              <FileUp className="h-4 w-4" />
-            </IconTile>
-            <span className="text-sm font-medium text-zinc-900">
-              {busy === "resume" ? "Parsing…" : "Drop a resume or click to browse"}
-            </span>
-            <span className="text-xs text-zinc-500">
-              PDF or plain text. Scanned PDFs need OCR, which is not wired up yet.
-            </span>
-          </button>
-        </Card>
-      </Stagger>
+      <GroundingWizard
+        open={wizardOpen}
+        initialStep={wizardStep}
+        candidate={candidate}
+        linkedinConfigured={linkedinConfigured}
+        nutrientConfigured={nutrientConfigured}
+        linkedinCallback={linkedinCallback}
+        busy={busy}
+        error={actionError}
+        onClose={closeWizard}
+        onComplete={finishWizard}
+        onConnectLinkedin={connectLinkedin}
+        onUpload={uploadResume}
+        onSkipLinkedin={skipLinkedin}
+      />
 
       {/* Career goal */}
       <Reveal delay={180} className="mt-3">
@@ -276,7 +360,7 @@ export default function ProfilePage() {
         </Card>
       </Reveal>
 
-      {grounded && candidate ? (
+      {showProfile && candidate ? (
         <>
           {/* Completeness + counts */}
           <div className="mt-6 grid gap-3 lg:grid-cols-[280px_1fr]">
@@ -337,105 +421,170 @@ export default function ProfilePage() {
           <Reveal delay={340} className="mt-3">
             <Card className="overflow-hidden">
               <div className="flex flex-wrap items-start justify-between gap-3 border-b border-line bg-surface-muted px-5 py-4">
-                <div className="min-w-0">
-                  <h2 className="text-base font-semibold tracking-tight text-zinc-950">
-                    {candidate.full_name}
-                  </h2>
-                  <p className="mt-0.5 text-sm text-zinc-600">{candidate.headline}</p>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
-                    {candidate.location ? (
-                      <span className="inline-flex items-center gap-1">
-                        <MapPin className="h-3 w-3" />
-                        {candidate.location}
-                      </span>
+                <div className="flex min-w-0 items-start gap-3">
+                  {candidate.picture_url ? (
+                    // LinkedIn CDN URLs are short-lived; initials remain the fallback.
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={candidate.picture_url}
+                      alt=""
+                      className="h-12 w-12 shrink-0 rounded-full object-cover"
+                    />
+                  ) : null}
+                  <div className="min-w-0">
+                    <h2 className="text-base font-semibold tracking-tight text-zinc-950">
+                      {candidate.full_name ?? "Imported LinkedIn member"}
+                    </h2>
+                    {candidate.headline ? (
+                      <p className="mt-0.5 text-sm text-zinc-600">{candidate.headline}</p>
                     ) : null}
-                    {candidate.target_title ? (
-                      <span className="inline-flex items-center gap-1">
-                        <Target className="h-3 w-3" />
-                        Targeting {candidate.target_title}
-                      </span>
-                    ) : null}
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
+                      {homeCity(candidate.location) ? (
+                        <span className="inline-flex items-center gap-1">
+                          <MapPin className="h-3 w-3" />
+                          {homeCity(candidate.location)}
+                        </span>
+                      ) : null}
+                      {candidate.email ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Mail className="h-3 w-3" />
+                          {candidate.email}
+                        </span>
+                      ) : null}
+                      {candidate.target_title ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Target className="h-3 w-3" />
+                          Targeting {candidate.target_title}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {candidate.grounding_sources.map((source) => (
-                    <Badge key={source} tone="positive">
-                      via {source}
-                    </Badge>
-                  ))}
+                  {candidate.linkedin_connected ? (
+                    <Badge tone="positive">via linkedin</Badge>
+                  ) : null}
+                  {candidate.grounding_sources
+                    .filter((source) => source !== "linkedin")
+                    .map((source) => (
+                      <Badge key={source} tone="positive">
+                        via {source}
+                      </Badge>
+                    ))}
                 </div>
               </div>
 
               <div className="space-y-6 px-5 py-5">
+                {identityOnly ? (
+                  <Callout tone="warning" icon={<FileUp className="h-4 w-4" />}>
+                    LinkedIn only shared identity with this app. Continue setup above to import a
+                    LinkedIn PDF or resume — no form required.
+                  </Callout>
+                ) : null}
+
                 {candidate.summary ? (
                   <p className="text-sm leading-6 text-zinc-700">{candidate.summary}</p>
                 ) : null}
 
-                <Group icon={<Wrench className="h-3.5 w-3.5" />} title="Skills">
-                  <div className="flex flex-wrap gap-1.5">
-                    {candidate.skills.map((skill) => (
-                      <Badge key={skill}>{skill}</Badge>
-                    ))}
-                  </div>
-                </Group>
-
-                <Group icon={<Briefcase className="h-3.5 w-3.5" />} title="Experience">
-                  <ol className="relative space-y-5">
-                    {candidate.experience.map((role, index) => (
-                      <li key={`${role.company}-${role.title}`} className="relative flex gap-3">
-                        {index < candidate.experience.length - 1 ? (
-                          <span className="absolute left-[13px] top-7 bottom-[-20px] w-px bg-zinc-200" />
-                        ) : null}
-                        <IconTile tone="neutral" className="mt-0.5">
-                          <Building2 className="h-3.5 w-3.5" />
-                        </IconTile>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-baseline justify-between gap-2">
-                            <p className="text-sm font-medium text-zinc-900">
-                              {role.title} · {role.company}
-                            </p>
-                            <p className="tnum text-xs text-zinc-500">
-                              {role.start_date} – {role.end_date}
-                            </p>
-                          </div>
-                          <ul className="mt-2 space-y-1.5">
-                            {role.bullets.map((bullet) => (
-                              <li
-                                key={bullet}
-                                className="flex gap-2 text-sm leading-6 text-zinc-700"
-                              >
-                                <span className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-zinc-400" />
-                                {bullet}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                </Group>
-
-                {candidate.education.length > 0 ? (
-                  <Group icon={<GraduationCap className="h-3.5 w-3.5" />} title="Education">
-                    <ul className="space-y-1">
-                      {candidate.education.map((entry) => (
-                        <li key={entry} className="text-sm leading-6 text-zinc-700">
-                          {entry}
-                        </li>
-                      ))}
-                    </ul>
+                {(candidate.websites ?? []).length > 0 ? (
+                  <Group icon={<Globe className="h-3.5 w-3.5" />} title="Links">
+                    <TimelineList
+                      icon={<Link2 className="h-3.5 w-3.5" />}
+                      items={candidate.websites.map((url) => ({
+                        key: url,
+                        title: url.replace(/^https?:\/\//, ""),
+                      }))}
+                    />
                   </Group>
                 ) : null}
 
-                {candidate.certifications.length > 0 ? (
-                  <Group icon={<Award className="h-3.5 w-3.5" />} title="Certifications">
+                {(candidate.skills ?? []).length > 0 ? (
+                  <Group icon={<Wrench className="h-3.5 w-3.5" />} title="Skills">
                     <div className="flex flex-wrap gap-1.5">
-                      {candidate.certifications.map((entry) => (
-                        <Badge key={entry} tone="info">
+                      {candidate.skills.map((skill) => (
+                        <Badge key={skill}>{skill}</Badge>
+                      ))}
+                    </div>
+                  </Group>
+                ) : null}
+
+                {(candidate.experience ?? []).length > 0 ? (
+                  <Group icon={<Briefcase className="h-3.5 w-3.5" />} title="Experience">
+                    <RoleList roles={candidate.experience} icon={<Building2 className="h-3.5 w-3.5" />} />
+                  </Group>
+                ) : null}
+
+                {(candidate.education ?? []).length > 0 ? (
+                  <Group icon={<GraduationCap className="h-3.5 w-3.5" />} title="Education">
+                    <TimelineList
+                      icon={<GraduationCap className="h-3.5 w-3.5" />}
+                      items={groupWrappedLines(candidate.education, isEducationHeader).map((item, index) => ({
+                        key: `${item.title}-${index}`,
+                        title: item.title,
+                        subtitle: item.description,
+                        date: item.date,
+                        tags: item.stack,
+                        bullets: item.bullets,
+                      }))}
+                    />
+                  </Group>
+                ) : null}
+
+                {(candidate.volunteering ?? []).length > 0 ? (
+                  <Group icon={<HeartHandshake className="h-3.5 w-3.5" />} title="Volunteering">
+                    <RoleList
+                      roles={candidate.volunteering}
+                      icon={<HeartHandshake className="h-3.5 w-3.5" />}
+                    />
+                  </Group>
+                ) : null}
+
+                {(candidate.projects ?? []).length > 0 ? (
+                  <Group icon={<FolderKanban className="h-3.5 w-3.5" />} title="Projects">
+                    <ProjectList projects={candidate.projects} />
+                  </Group>
+                ) : null}
+
+                {(candidate.languages ?? []).length > 0 ? (
+                  <Group icon={<Globe className="h-3.5 w-3.5" />} title="Languages">
+                    <div className="flex flex-wrap gap-1.5">
+                      {candidate.languages.map((entry) => (
+                        <Badge key={entry} tone="neutral">
                           {entry}
                         </Badge>
                       ))}
                     </div>
+                  </Group>
+                ) : null}
+
+                {(candidate.honors ?? []).length > 0 ? (
+                  <Group icon={<Award className="h-3.5 w-3.5" />} title="Honors">
+                    <TimelineList
+                      icon={<Award className="h-3.5 w-3.5" />}
+                      items={groupWrappedLines(candidate.honors, isHonorHeader).map((item, index) => ({
+                        key: `${item.title}-${index}`,
+                        title: item.title,
+                        subtitle: item.description,
+                        date: item.date,
+                        bullets: item.bullets,
+                      }))}
+                    />
+                  </Group>
+                ) : null}
+
+                {(candidate.certifications ?? []).length > 0 ? (
+                  <Group icon={<BadgeCheck className="h-3.5 w-3.5" />} title="Certifications">
+                    <TimelineList
+                      icon={<BadgeCheck className="h-3.5 w-3.5" />}
+                      items={groupWrappedLines(candidate.certifications, isCertHeader).map((item, index) => ({
+                        key: `${item.title}-${index}`,
+                        title: item.title,
+                        subtitle: item.description,
+                        date: item.date,
+                        tags: item.stack,
+                        bullets: item.bullets,
+                      }))}
+                    />
                   </Group>
                 ) : null}
               </div>
@@ -452,7 +601,9 @@ export default function ProfilePage() {
                   description="What Matchr is allowed to read from and send as."
                 />
                 <ul className="mt-3 divide-y divide-zinc-100">
-                  {integrations.map((integration) => (
+                  {integrations
+                    .filter((integration) => integration.provider !== "nutrient")
+                    .map((integration) => (
                     <li
                       key={integration.provider}
                       className="flex flex-wrap items-center justify-between gap-3 py-3"
@@ -481,11 +632,19 @@ export default function ProfilePage() {
                           variant={integration.connected ? "ghost" : "secondary"}
                           disabled={busy !== null}
                           loading={busy === integration.provider}
-                          onClick={() =>
-                            run(integration.provider, () =>
+                          onClick={() => {
+                            if (
+                              integration.provider === "linkedin" &&
+                              !integration.connected &&
+                              integration.configured
+                            ) {
+                              void connectLinkedin();
+                              return;
+                            }
+                            void run(integration.provider, () =>
                               api.connectIntegration(integration.provider, !integration.connected),
-                            )
-                          }
+                            );
+                          }}
                         >
                           {integration.connected ? "Disconnect" : "Connect"}
                         </Button>
@@ -497,25 +656,210 @@ export default function ProfilePage() {
             </Reveal>
           ) : null}
 
-          <Reveal delay={460} className="mt-3">
-            <Callout tone="neutral" icon={<ShieldCheck className="h-4 w-4" />}>
-              <span className="font-medium">This is the contract. </span>
-              Tailoring may reorder and re-emphasize anything above, but it cannot add to it. Any
-              generated technical claim absent from this profile is rejected before you ever see it.
-            </Callout>
-          </Reveal>
+          {grounded ? (
+            <>
+              <Reveal delay={460} className="mt-3">
+                <Callout tone="neutral" icon={<ShieldCheck className="h-4 w-4" />}>
+                  <span className="font-medium">This is the contract. </span>
+                  Tailoring may reorder and re-emphasize anything above, but it cannot add to it. Any
+                  generated technical claim absent from this profile is rejected before you ever see it.
+                </Callout>
+              </Reveal>
 
-          <div className="mt-4 flex justify-end">
-            <Link href="/jobs">
-              <Button>
-                See your ranked matches
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </Link>
-          </div>
+              <div className="mt-4 flex justify-end">
+                <Link href="/jobs">
+                  <Button>
+                    See your ranked matches
+                    <ArrowRight className="h-4 w-4" />
+                  </Button>
+                </Link>
+              </div>
+            </>
+          ) : null}
         </>
       ) : null}
     </div>
+  );
+}
+
+const DATE_AT_END =
+  /(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+)?(?:19|20)\d{2}(?:\s*[-–—]\s*(?:Present|(?:(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+)?(?:19|20)\d{2}))?\s*$/i;
+
+type ParsedLine = {
+  title: string;
+  stack: string[];
+  date: string | null;
+  description: string | null;
+  bullets: string[];
+};
+
+type TimelineEntry = {
+  key: string;
+  title: string;
+  subtitle?: string | null;
+  date?: string | null;
+  location?: string | null;
+  tags?: string[];
+  description?: string | null;
+  bullets?: string[];
+};
+
+function parseDatedLine(entry: string): Omit<ParsedLine, "bullets"> {
+  const cleaned = entry.replace(/^[•*\-–—]\s*/, "").trim();
+  const dateMatch = cleaned.match(DATE_AT_END);
+  const date = dateMatch && dateMatch[0].trim().length >= 4 ? dateMatch[0].trim() : null;
+  const withoutDate = date ? cleaned.slice(0, cleaned.length - date.length).trim() : cleaned;
+  const parts = withoutDate
+    .split(/\s*[|·]\s+|\s+[—–]\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const title = parts[0] ?? withoutDate;
+  const rest = parts.slice(1).join(" · ").trim();
+  const tokens = rest
+    .split(/,\s*/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const looksLikeStack =
+    tokens.length > 1 && tokens.every((token) => token.length <= 28 && token.split(/\s+/).length <= 3);
+
+  return {
+    title,
+    stack: looksLikeStack ? tokens : [],
+    date,
+    description: looksLikeStack ? null : rest || null,
+  };
+}
+
+function isWrappedLine(entry: string): boolean {
+  const trimmed = entry.trim();
+  return !trimmed || /^[•*\-–—]\s/.test(trimmed) || trimmed[0] === trimmed[0].toLowerCase();
+}
+
+function isProjectHeader(entry: string): boolean {
+  if (isWrappedLine(entry)) return false;
+  return /[|·]/.test(entry) || DATE_AT_END.test(entry);
+}
+
+function isEducationHeader(entry: string): boolean {
+  if (isWrappedLine(entry) || /coursework\s*:/i.test(entry)) return false;
+  return (
+    /\b(university|college|school|bachelor|master|diploma|phd|degree)\b/i.test(entry) ||
+    DATE_AT_END.test(entry)
+  );
+}
+
+function isCertHeader(entry: string): boolean {
+  if (isWrappedLine(entry)) return false;
+  return (
+    /\b(certificate|certification|certified|license|nanodegree)\b/i.test(entry) ||
+    /[|·]/.test(entry) ||
+    DATE_AT_END.test(entry)
+  );
+}
+
+function isHonorHeader(entry: string): boolean {
+  return !isWrappedLine(entry);
+}
+
+function groupWrappedLines(entries: string[], isHeader: (entry: string) => boolean): ParsedLine[] {
+  const items: ParsedLine[] = [];
+  for (const entry of entries) {
+    const text = entry.replace(/^[•*\-–—]\s*/, "").trim();
+    if (!text) continue;
+    if (!items.length || isHeader(entry)) {
+      items.push({ ...parseDatedLine(entry), bullets: [] });
+      continue;
+    }
+    const previous = items[items.length - 1];
+    const last = previous.bullets.at(-1);
+    if (last && (text[0] === text[0].toLowerCase() || last.endsWith(",") || last.endsWith("-"))) {
+      previous.bullets[previous.bullets.length - 1] = `${last} ${text}`;
+    } else {
+      previous.bullets.push(text);
+    }
+  }
+  return items;
+}
+
+function TimelineList({ items, icon }: { items: TimelineEntry[]; icon: React.ReactNode }) {
+  return (
+    <ol className="relative space-y-5">
+      {items.map((item, index) => (
+        <li key={item.key} className="relative flex gap-3">
+          {index < items.length - 1 ? (
+            <span className="absolute left-[13px] top-7 bottom-[-20px] w-px bg-zinc-200" />
+          ) : null}
+          <IconTile tone="neutral" className="mt-0.5">
+            {icon}
+          </IconTile>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="text-sm font-medium text-zinc-900">{item.title}</p>
+              {item.date ? <p className="tnum text-xs text-zinc-500">{item.date}</p> : null}
+            </div>
+            {item.location ? <p className="mt-0.5 text-xs text-zinc-500">{item.location}</p> : null}
+            {item.subtitle ? <p className="mt-1 text-sm leading-6 text-zinc-700">{item.subtitle}</p> : null}
+            {item.description ? <p className="mt-1 text-sm leading-6 text-zinc-700">{item.description}</p> : null}
+            {item.tags && item.tags.length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {item.tags.map((tag) => (
+                  <Badge key={tag} tone="neutral">
+                    {tag}
+                  </Badge>
+                ))}
+              </div>
+            ) : null}
+            {item.bullets && item.bullets.length > 0 ? (
+              <ul className="mt-2 space-y-1.5">
+                {item.bullets.map((bullet) => (
+                  <li key={bullet} className="flex gap-2 text-sm leading-6 text-zinc-700">
+                    <span className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-zinc-400" />
+                    {bullet}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function ProjectList({ projects }: { projects: string[] }) {
+  return (
+    <TimelineList
+      icon={<FolderKanban className="h-3.5 w-3.5" />}
+      items={groupWrappedLines(projects, isProjectHeader).map((item, index) => ({
+        key: `${item.title}-${item.date}-${index}`,
+        title: item.title,
+        date: item.date,
+        description: item.description,
+        tags: item.stack,
+        bullets: item.bullets,
+      }))}
+    />
+  );
+}
+
+function RoleList({
+  roles,
+  icon,
+}: {
+  roles: Experience[];
+  icon: React.ReactNode;
+}) {
+  return (
+    <TimelineList
+      icon={icon}
+      items={roles.map((role) => ({
+        key: `${role.company}-${role.title}-${role.start_date}`,
+        title: [role.title, role.company].filter(Boolean).join(" · "),
+        date: [role.start_date, role.end_date].filter(Boolean).join(" – ") || null,
+        location: role.location,
+        bullets: role.bullets,
+      }))}
+    />
   );
 }
 

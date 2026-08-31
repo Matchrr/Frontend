@@ -5,6 +5,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import { useAsync } from "@/lib/useAsync";
 import type { Candidate, Overview } from "@/lib/types";
+import { useAuth } from "@/components/AuthProvider";
 
 type ProfileState = {
   candidate: Candidate | null;
@@ -22,13 +23,19 @@ type ProfileState = {
 
 const ProfileContext = createContext<ProfileState | null>(null);
 
-async function loadProfile() {
+async function loadProfile(authenticated: boolean) {
+  if (!authenticated) return { candidate: null, overview: null };
   const [candidate, overview] = await Promise.all([api.me(), api.overview()]);
   return { candidate, overview };
 }
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const { data, loading, error, reload } = useAsync(loadProfile);
+  const { user, ready, required } = useAuth();
+  const shouldLoad = ready && (!required || user !== null);
+  const { data, loading, error, reload } = useAsync(
+    () => loadProfile(shouldLoad),
+    shouldLoad ? `profile:${user?.id ?? "demo"}` : "profile:idle",
+  );
 
   const value = useMemo<ProfileState>(
     () => ({

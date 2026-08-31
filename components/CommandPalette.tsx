@@ -1,9 +1,10 @@
 "use client";
 
-import { RefreshCw, Search } from "lucide-react";
+import { LogOut, RefreshCw, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { useAuth } from "@/components/AuthProvider";
 import { cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { NAV_ITEMS } from "@/lib/nav";
@@ -57,6 +58,7 @@ function Palette({
   onRefresh: () => Promise<void>;
 }) {
   const router = useRouter();
+  const { user, logout } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -83,6 +85,17 @@ function Palette({
         await onRefresh();
       },
     },
+    ...(user
+      ? [
+          {
+            id: "logout",
+            label: "Log out",
+            hint: "End this Xano session",
+            icon: LogOut,
+            run: () => logout(),
+          } satisfies Command,
+        ]
+      : []),
   ];
 
   const needle = query.trim().toLowerCase();

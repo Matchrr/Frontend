@@ -1,3 +1,5 @@
+import { authHeaders, clearSession, getToken } from "@/lib/session";
+import type { AuthSession, AuthStatus, AuthUser } from "@/lib/session";
 import type {
   Application,
   Candidate,
@@ -30,12 +32,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers: {
         ...(init?.body instanceof FormData ? {} : { "Content-Type": "application/json" }),
+        ...authHeaders(),
         ...(init?.headers ?? {}),
       },
       cache: "no-store",
     });
   } catch {
     throw new ApiError(0, `Cannot reach the Matchr backend at ${API_URL}. Is it running?`);
+  }
+
+  if (response.status === 401) {
+    handleUnauthorized();
+    throw new ApiError(401, await readError(response));
   }
 
   if (!response.ok) {
@@ -64,7 +72,42 @@ async function readError(response: Response): Promise<string> {
 const post = <T,>(path: string, body?: unknown) =>
   request<T>(path, { method: "POST", body: body === undefined ? undefined : JSON.stringify(body) });
 
+function handleUnauthorized() {
+  if (!getToken()) return;
+  clearSession();
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/login") return;
+  window.location.assign("/login");
+}
+
+export type JobSyncResult = {
+  synced: number;
+  at: string;
+  source?: string;
+  inserted?: number;
+  updated?: number;
+  embedded?: number;
+  cached_queries?: number;
+  harvested_queries?: number;
+  warning?: string | null;
+};
+
+export type JobMatchFilters = {
+  workModes?: string[];
+  employmentTypes?: string[];
+  payMin?: number | null;
+  payPeriod?: string;
+};
+
 export const api = {
+  authStatus: () => request<AuthStatus>("/api/auth/status"),
+  login: (email: string, password: string) =>
+    post<AuthSession>("/api/auth/login", { email, password }),
+  signup: (email: string, password: string) =>
+    post<AuthSession>("/api/auth/signup", { email, password }),
+  authMe: () => request<AuthUser>("/api/auth/me"),
+  logout: () => post<{ status: string }>("/api/auth/logout"),
+
   overview: () => request<Overview>("/api/overview"),
 
   me: () => request<Candidate>("/api/candidates/me"),
@@ -81,9 +124,23 @@ export const api = {
   },
   resetProfile: () => post<Candidate>("/api/candidates/reset"),
 
-  jobMatches: (limit = 10) => request<Job[]>(`/api/jobs/matches?limit=${limit}`),
+  jobMatches: (limit = 10, filters?: JobMatchFilters) => {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (filters?.workModes?.length) params.set("work_modes", filters.workModes.join(","));
+    if (filters?.employmentTypes?.length) {
+      params.set("employment_types", filters.employmentTypes.join(","));
+    }
+    if (filters?.payMin != null) params.set("pay_min", String(filters.payMin));
+    if (filters?.payPeriod) params.set("pay_period", filters.payPeriod);
+    return request<Job[]>(`/api/jobs/matches?${params.toString()}`);
+  },
   job: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
-  syncJobs: () => post<{ synced: number; at: string }>("/api/jobs/sync"),
+  syncJobs: (payload?: {
+    work_modes?: string[];
+    employment_types?: string[];
+    pay_min?: number | null;
+    pay_period?: string;
+  }) => post<JobSyncResult>("/api/jobs/sync", payload ?? {}),
 
   applications: () => request<Application[]>("/api/applications"),
   targetJob: (jobId: string) => post<Application>("/api/applications", { job_id: jobId }),

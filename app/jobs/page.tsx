@@ -9,12 +9,20 @@ import {
   FileText,
   Lightbulb,
   MapPin,
-  RefreshCw,
+  SlidersHorizontal,
   Wallet,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
+import {
+  MatchingWizard,
+  MATCH_SOURCE_KEY,
+  matchSetupSummary,
+  readMatchSetup,
+  writeMatchSetup,
+  type MatchSetup,
+} from "@/components/MatchingWizard";
 import { useProfile } from "@/components/ProfileProvider";
 import {
   Badge,
@@ -28,7 +36,6 @@ import {
   ScoreRing,
   SegmentedTabs,
   SkeletonList,
-  cx,
   matchLabel,
   matchTone,
   type TabItem,
@@ -46,18 +53,109 @@ export default function JobsPage() {
   const { candidate, overview, initializing, refresh: refreshProfile } = useProfile();
   const grounded = candidate?.grounded ?? false;
 
+  const [setup, setSetup] = useState<MatchSetup | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
+  const [runId, setRunId] = useState(0);
+  const [proceeding, setProceeding] = useState(false);
+  const [setupError, setSetupError] = useState<string | null>(null);
+
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [filter, setFilter] = useState<Filter>("all");
+  const [jobSource, setJobSource] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!grounded) {
+      setHydrated(true);
+      return;
+    }
+    const saved = readMatchSetup();
+    try {
+      setJobSource(window.sessionStorage.getItem(MATCH_SOURCE_KEY));
+    } catch {
+      setJobSource(null);
+    }
+    if (saved) {
+      setSetup(saved);
+    } else {
+      const timer = window.setTimeout(() => setWizardOpen(true), 180);
+      setHydrated(true);
+      return () => window.clearTimeout(timer);
+    }
+    setHydrated(true);
+  }, [grounded]);
+
+  const fetchKey = setup
+    ? `job-matches:${setup.limit}:${setup.workModes.join(",")}:${setup.employmentTypes.join(",")}:${setup.payMin}:${setup.payPeriod}:${runId}`
+    : "pending-setup";
   const {
     data: jobs,
     loading,
     error,
     reload,
-  } = useAsync(() => api.jobMatches(12), String(grounded));
+  } = useAsync(
+    () =>
+      setup
+        ? api.jobMatches(setup.limit, {
+            workModes: setup.workModes,
+            employmentTypes: setup.employmentTypes,
+            payMin: setup.payMin,
+            payPeriod: setup.payPeriod,
+          })
+        : Promise.resolve([] as Job[]),
+    fetchKey,
+  );
 
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [syncing, setSyncing] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [filter, setFilter] = useState<Filter>("all");
+  const closeWizard = useCallback(() => {
+    if (!proceeding) setWizardOpen(false);
+  }, [proceeding]);
+
+  async function proceed(next: MatchSetup) {
+    setProceeding(true);
+    setSetupError(null);
+    try {
+      const primaryRole = next.desiredRoles[0]?.trim() ?? "";
+      if (!primaryRole) {
+        setSetupError("Add at least one desired role.");
+        return;
+      }
+      if (next.workModes.length === 0) {
+        setSetupError("Select at least one work arrangement.");
+        return;
+      }
+      if (next.employmentTypes.length === 0) {
+        setSetupError("Select at least one job type.");
+        return;
+      }
+      if (primaryRole !== (candidate?.target_title ?? "").trim()) {
+        await api.updateMe({ target_title: primaryRole });
+      }
+      const synced = await api.syncJobs({
+        work_modes: next.workModes,
+        employment_types: next.employmentTypes,
+        pay_min: next.payMin,
+        pay_period: next.payPeriod,
+      });
+      const source = synced.source ?? "xano";
+      try {
+        window.sessionStorage.setItem(MATCH_SOURCE_KEY, source);
+      } catch {
+        // sessionStorage can be unavailable in private contexts.
+      }
+      setJobSource(source);
+      writeMatchSetup(next);
+      setSetup(next);
+      setRunId((value) => value + 1);
+      setWizardOpen(false);
+      await refreshProfile();
+    } catch (cause) {
+      setSetupError(cause instanceof Error ? cause.message : "Could not start matching.");
+    } finally {
+      setProceeding(false);
+    }
+  }
 
   async function toggleTarget(job: Job) {
     setBusyId(job.id);
@@ -76,18 +174,8 @@ export default function JobsPage() {
     }
   }
 
-  async function sync() {
-    setSyncing(true);
-    try {
-      await api.syncJobs();
-      await Promise.all([reload(), refreshProfile()]);
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   // Without this the ungrounded empty state flashes before the profile lands.
-  if (initializing) {
+  if (initializing || (grounded && !hydrated)) {
     return (
       <div>
         <PageHeader
@@ -120,7 +208,11 @@ export default function JobsPage() {
     );
   }
 
-  const all = jobs ?? [];
+  const started = setup !== null;
+  const matching = started && loading;
+  const targetTitle = candidate?.target_title;
+
+  const all = started ? (jobs ?? []) : [];
   const strong = all.filter((job) => (job.scorecard?.match_percent ?? 0) >= STRONG_MATCH);
   const targeted = all.filter((job) => job.targeted);
   const visible = filter === "strong" ? strong : filter === "targeted" ? targeted : all;
@@ -142,24 +234,39 @@ export default function JobsPage() {
           </Badge>
         }
         title="Job matches"
-        description={`Ranked against your profile and target role. Select up to ${overview?.target_limit ?? 5} — the cap is the point.`}
+        description={
+          started && setup
+            ? `Ranked against your profile and ${matchSetupSummary(setup)}. Select up to ${overview?.target_limit ?? 5} — the cap is the point.`
+            : "Choose desired roles, work arrangement, job type, and a pay floor, then proceed."
+        }
         actions={
-          <Button variant="secondary" size="sm" onClick={sync} disabled={syncing}>
-            <RefreshCw className={cx("h-3.5 w-3.5", syncing && "animate-spin")} />
-            Refresh listings
+          <Button variant="secondary" size="sm" onClick={() => {
+            setSetupError(null);
+            setWizardOpen(true);
+          }}>
+            <SlidersHorizontal className="h-3.5 w-3.5" />
+            {started ? "Adjust matching" : "Set up matching"}
           </Button>
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <SegmentedTabs items={tabs} value={filter} onChange={setFilter} />
-        {atCap ? (
-          <p className="flex items-center gap-1.5 text-xs text-amber-700">
-            <CircleAlert className="h-3.5 w-3.5" />
-            At the cap. Drop a target before adding another.
-          </p>
-        ) : null}
-      </div>
+      {started && jobSource === "seed_corpus" ? (
+        <Callout className="mb-4" tone="warning" label="Demo corpus.">
+          Live listings unavailable — showing demo roles instead of Google Jobs.
+        </Callout>
+      ) : null}
+
+      {started ? (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <SegmentedTabs items={tabs} value={filter} onChange={setFilter} />
+          {atCap ? (
+            <p className="flex items-center gap-1.5 text-xs text-amber-700">
+              <CircleAlert className="h-3.5 w-3.5" />
+              At the cap. Drop a target before adding another.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {actionError ? (
         <div className="mb-4">
@@ -172,7 +279,19 @@ export default function JobsPage() {
         </div>
       ) : null}
 
-      {loading ? (
+      {!started ? (
+        <EmptyState
+          icon={<Crosshair className="h-5 w-5" />}
+          title="Matching has not started"
+          description="Pick the titles you want, how you want to work, and a pay floor. Nothing is ranked until you proceed."
+          action={
+            <Button onClick={() => {
+              setSetupError(null);
+              setWizardOpen(true);
+            }}>Set up matching</Button>
+          }
+        />
+      ) : matching ? (
         <SkeletonList rows={4} height="h-44" />
       ) : visible.length === 0 ? (
         <EmptyState
@@ -181,7 +300,7 @@ export default function JobsPage() {
           description={
             filter === "targeted"
               ? "Pick 3–5 high-fit roles and they will collect here, ready for dossier generation."
-              : "No role in the current corpus cleared the strong-fit threshold. Refresh the listings or widen your target title."
+              : "No role in the current corpus cleared the strong-fit threshold. Adjust matching or widen work arrangement, job type, or pay."
           }
           action={
             <Button variant="secondary" onClick={() => setFilter("all")}>
@@ -323,12 +442,22 @@ export default function JobsPage() {
         </div>
       )}
 
-      {!loading && visible.length > 0 ? (
+      {!matching && visible.length > 0 ? (
         <p className="mt-4 text-center text-xs text-zinc-400">
           {visible.length} {plural(visible.length, "role")} shown · ranked by semantic similarity
           against your Ground Truth Profile
         </p>
       ) : null}
+
+      <MatchingWizard
+        open={wizardOpen}
+        savedTargetTitle={targetTitle ?? null}
+        initial={setup}
+        busy={proceeding}
+        error={setupError}
+        onClose={closeWizard}
+        onProceed={proceed}
+      />
     </div>
   );
 }

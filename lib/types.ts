@@ -133,6 +133,9 @@ export type Dossier = {
   ats_answers: AtsAnswer[];
   grounding: GroundingCheck;
   generated_at: string;
+  generation_source?: string | null;
+  retrieved_chunk_ids?: number[];
+  cover_letter_id?: number | null;
 };
 
 export type OutreachDraft = {

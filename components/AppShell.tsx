@@ -3,6 +3,8 @@
 import {
   ChevronsLeft,
   ChevronsRight,
+  LogIn,
+  LogOut,
   Menu,
   RefreshCw,
   Search,
@@ -10,12 +12,13 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 
 import { CommandPalette, useCommandPalette } from "@/components/CommandPalette";
+import { useAuth } from "@/components/AuthProvider";
 import { ProfileProvider, useProfile } from "@/components/ProfileProvider";
-import { Button, LiveDot, Reveal, cx } from "@/components/ui";
+import { Button, ButtonLink, LiveDot, Reveal, cx } from "@/components/ui";
 import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/format";
 import { NAV_GROUPS, findNavItem } from "@/lib/nav";
@@ -175,6 +178,7 @@ function SidebarContent({
 }) {
   const pathname = usePathname();
   const { candidate, overview } = useProfile();
+  const { user, logout } = useAuth();
 
   return (
     <>
@@ -273,14 +277,44 @@ function SidebarContent({
           {collapsed ? null : (
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-medium text-zinc-900">
-                {candidate?.full_name ?? "Not grounded yet"}
+                {candidate?.full_name ?? user?.name ?? user?.email ?? "Not grounded yet"}
               </p>
               <p className="truncate text-[11px] text-zinc-500">
-                {candidate?.target_title ?? "No target role set"}
+                {candidate?.target_title ?? user?.email ?? "No target role set"}
               </p>
             </div>
           )}
         </div>
+        {collapsed ? (
+          user ? (
+            <button
+              type="button"
+              onClick={() => void logout()}
+              aria-label="Log out"
+              className="flex h-8 w-full items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              aria-label="Sign in"
+              className="flex h-8 w-full items-center justify-center rounded-lg text-zinc-400 hover:bg-zinc-200/60 hover:text-zinc-700"
+            >
+              <LogIn className="h-4 w-4" />
+            </Link>
+          )
+        ) : user ? (
+          <Button variant="ghost" size="xs" className="w-full justify-start" onClick={() => void logout()}>
+            <LogOut className="h-3.5 w-3.5" />
+            Log out
+          </Button>
+        ) : (
+          <ButtonLink href="/login" variant="secondary" size="xs" className="w-full">
+            <LogIn className="h-3.5 w-3.5" />
+            Sign in
+          </ButtonLink>
+        )}
       </div>
     </>
   );
@@ -424,9 +458,40 @@ function Shell({ children }: { children: ReactNode }) {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { user, ready, required } = useAuth();
+  const isLogin = pathname === "/login";
+
+  useEffect(() => {
+    if (!ready || isLogin) return;
+    if (required && !user) router.replace("/login");
+  }, [ready, required, user, isLogin, router]);
+
+  if (isLogin) {
+    return <>{children}</>;
+  }
+
+  if (!ready || (required && !user)) {
+    return <ShellSkeleton />;
+  }
+
   return (
     <ProfileProvider>
       <Shell>{children}</Shell>
     </ProfileProvider>
+  );
+}
+
+function ShellSkeleton() {
+  return (
+    <div className="flex min-h-screen bg-canvas">
+      <div className="hidden w-[252px] shrink-0 lg:block" />
+      <div className="min-w-0 flex-1 p-2.5 lg:pl-0">
+        <div className="flex min-h-[calc(100vh-1.25rem)] items-center justify-center rounded-2xl border border-line bg-surface shadow-card">
+          <p className="text-sm text-zinc-500">Loading session…</p>
+        </div>
+      </div>
+    </div>
   );
 }

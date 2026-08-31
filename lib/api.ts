@@ -1,4 +1,4 @@
-import { authHeaders, clearSession, getToken } from "@/lib/session";
+import { authHeaders, clearSession, getToken, isAuthPage } from "@/lib/session";
 import type { AuthSession, AuthStatus, AuthUser } from "@/lib/session";
 import type {
   Application,
@@ -76,7 +76,7 @@ function handleUnauthorized() {
   if (!getToken()) return;
   clearSession();
   if (typeof window === "undefined") return;
-  if (window.location.pathname === "/login") return;
+  if (isAuthPage(window.location.pathname)) return;
   window.location.assign("/login");
 }
 
@@ -97,6 +97,7 @@ export type JobMatchFilters = {
   employmentTypes?: string[];
   payMin?: number | null;
   payPeriod?: string;
+  desiredRoles?: string[];
 };
 
 export const api = {
@@ -105,8 +106,12 @@ export const api = {
     post<AuthSession>("/api/auth/login", { email, password }),
   signup: (email: string, password: string) =>
     post<AuthSession>("/api/auth/signup", { email, password }),
+  forgotPassword: (email: string) => post<{ status: string }>("/api/auth/forgot-password", { email }),
+  resetPassword: (email: string, token: string, password: string) =>
+    post<AuthSession>("/api/auth/reset-password", { email, token, password }),
   authMe: () => request<AuthUser>("/api/auth/me"),
   logout: () => post<{ status: string }>("/api/auth/logout"),
+  googleAuthorize: () => request<{ url: string; configured: boolean }>("/api/auth/google/authorize"),
 
   overview: () => request<Overview>("/api/overview"),
 
@@ -117,9 +122,12 @@ export const api = {
   startLinkedinOAuth: () => request<{ url: string; configured: boolean; scopes: string[] }>(
     "/api/integrations/linkedin/authorize",
   ),
-  uploadResume: (file: File) => {
+  uploadResume: (file: File, kind?: "linkedin-pdf" | "resume" | "linkedin_pdf") => {
     const form = new FormData();
     form.append("file", file);
+    if (kind) {
+      form.append("kind", kind === "linkedin-pdf" ? "linkedin_pdf" : kind);
+    }
     return request<Candidate>("/api/candidates/resume", { method: "POST", body: form });
   },
   resetProfile: () => post<Candidate>("/api/candidates/reset"),
@@ -132,6 +140,7 @@ export const api = {
     }
     if (filters?.payMin != null) params.set("pay_min", String(filters.payMin));
     if (filters?.payPeriod) params.set("pay_period", filters.payPeriod);
+    if (filters?.desiredRoles?.length) params.set("desired_roles", filters.desiredRoles.join(","));
     return request<Job[]>(`/api/jobs/matches?${params.toString()}`);
   },
   job: (jobId: string) => request<Job>(`/api/jobs/${jobId}`),
@@ -140,6 +149,7 @@ export const api = {
     employment_types?: string[];
     pay_min?: number | null;
     pay_period?: string;
+    desired_roles?: string[];
   }) => post<JobSyncResult>("/api/jobs/sync", payload ?? {}),
 
   applications: () => request<Application[]>("/api/applications"),

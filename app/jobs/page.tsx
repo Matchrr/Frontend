@@ -88,7 +88,7 @@ export default function JobsPage() {
   }, [grounded]);
 
   const fetchKey = setup
-    ? `job-matches:${setup.limit}:${setup.workModes.join(",")}:${setup.employmentTypes.join(",")}:${setup.payMin}:${setup.payPeriod}:${runId}`
+    ? `job-matches:${setup.limit}:${setup.desiredRoles.join("|")}:${setup.workModes.join(",")}:${setup.employmentTypes.join(",")}:${setup.payMin}:${setup.payPeriod}:${runId}`
     : "pending-setup";
   const {
     data: jobs,
@@ -103,6 +103,7 @@ export default function JobsPage() {
             employmentTypes: setup.employmentTypes,
             payMin: setup.payMin,
             payPeriod: setup.payPeriod,
+            desiredRoles: setup.desiredRoles,
           })
         : Promise.resolve([] as Job[]),
     fetchKey,
@@ -137,6 +138,7 @@ export default function JobsPage() {
         employment_types: next.employmentTypes,
         pay_min: next.payMin,
         pay_period: next.payPeriod,
+        desired_roles: next.desiredRoles,
       });
       const source = synced.source ?? "xano";
       try {
@@ -325,6 +327,9 @@ export default function JobsPage() {
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
                           <h2 className="text-base font-semibold tracking-tight text-zinc-950">
+                            {job.rank ? (
+                              <span className="mr-2 font-medium text-zinc-400">#{job.rank}</span>
+                            ) : null}
                             {job.title}
                           </h2>
                           <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-zinc-500">
@@ -352,6 +357,9 @@ export default function JobsPage() {
                             <Badge tone={matchTone(score.match_percent)}>
                               {matchLabel(score.match_percent)}
                             </Badge>
+                          ) : null}
+                          {score?.ranking_score != null ? (
+                            <Badge tone="neutral">Rank {score.ranking_score}</Badge>
                           ) : null}
                         </div>
                       </div>
@@ -444,8 +452,9 @@ export default function JobsPage() {
 
       {!matching && visible.length > 0 ? (
         <p className="mt-4 text-center text-xs text-zinc-400">
-          {visible.length} {plural(visible.length, "role")} shown · ranked by semantic similarity
-          against your Ground Truth Profile
+          {visible.length} {plural(visible.length, "role")} shown
+          {setup && filter === "all" ? ` of ${setup.limit} requested` : ""}
+          {" · "}ranked by semantic similarity against your Ground Truth Profile
         </p>
       ) : null}
 

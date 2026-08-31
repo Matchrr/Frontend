@@ -20,7 +20,19 @@ export type AuthStatus = {
   configured: boolean;
   available: boolean;
   required: boolean;
+  google?: boolean;
 };
+
+export const AUTH_PAGE_PATHS = [
+  "/login",
+  "/forgot-password",
+  "/reset-password",
+  "/auth/google/callback",
+] as const;
+
+export function isAuthPage(pathname: string): boolean {
+  return (AUTH_PAGE_PATHS as readonly string[]).includes(pathname);
+}
 
 const listeners = new Set<() => void>();
 

@@ -21,7 +21,7 @@ import {
   type AuthUser,
 } from "@/lib/session";
 import { useAsync } from "@/lib/useAsync";
-import { xanoAuthConfigured, xanoLogin, xanoMe, xanoSignup } from "@/lib/xano";
+import { xanoAuthConfigured, xanoForgotPassword, xanoLogin, xanoMe, xanoResetPassword, xanoSignup } from "@/lib/xano";
 
 type AuthState = {
   user: AuthUser | null;
@@ -32,6 +32,8 @@ type AuthState = {
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  resetPassword: (email: string, token: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -58,6 +60,37 @@ async function authenticate(
     }
   }
   return fallback(email, password);
+}
+
+async function requestReset(email: string): Promise<void> {
+  const origin = window.location.origin;
+  if (xanoAuthConfigured()) {
+    try {
+      await xanoForgotPassword(email, origin);
+      return;
+    } catch (cause) {
+      if (cause instanceof ApiError && (cause.status === 0 || cause.status === 503)) {
+        await api.forgotPassword(email);
+        return;
+      }
+      throw cause;
+    }
+  }
+  await api.forgotPassword(email);
+}
+
+async function completeReset(email: string, token: string, password: string): Promise<AuthSession> {
+  if (xanoAuthConfigured()) {
+    try {
+      return await xanoResetPassword(email, token, password);
+    } catch (cause) {
+      if (cause instanceof ApiError && (cause.status === 0 || cause.status === 503)) {
+        return await api.resetPassword(email, token, password);
+      }
+      throw cause;
+    }
+  }
+  return api.resetPassword(email, token, password);
 }
 
 async function restoreUser(token: string | null): Promise<AuthUser | null> {
@@ -97,6 +130,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(await authenticate(email, password, "signup"));
   }, []);
 
+  const requestPasswordReset = useCallback(async (email: string) => {
+    await requestReset(email);
+  }, []);
+
+  const resetPassword = useCallback(async (email: string, token: string, password: string) => {
+    setSession(await completeReset(email, token, password));
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await api.logout();
@@ -120,9 +161,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       error: restored.error,
       login,
       signup,
+      requestPasswordReset,
+      resetPassword,
       logout,
     }),
-    [user, token, ready, status, required, restored.error, login, signup, logout],
+    [user, token, ready, status, required, restored.error, login, signup, requestPasswordReset, resetPassword, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

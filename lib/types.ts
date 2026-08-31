@@ -1,6 +1,8 @@
 export type FitScorecard = {
   match_percent: number;
   similarity: number;
+  semantic_score: number | null;
+  ranking_score: number | null;
   matching_skills: string[];
   missing_tech: string[];
   key_angle: string | null;
@@ -16,6 +18,7 @@ export type Job = {
   salary: string | null;
   apply_url: string | null;
   description: string | null;
+  rank: number | null;
   scorecard: FitScorecard | null;
   targeted: boolean;
 };

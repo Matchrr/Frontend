@@ -29,6 +29,7 @@ import {
   GroundingStatus,
   GroundingWizard,
   LINKEDIN_SKIP_KEY,
+  type DocumentSource,
   type WizardStep,
 } from "@/components/GroundingWizard";
 import { useProfile } from "@/components/ProfileProvider";
@@ -157,11 +158,11 @@ export default function ProfilePage() {
     }
   }
 
-  async function uploadResume(file: File) {
+  async function uploadResume(file: File, source?: DocumentSource) {
     setBusy("resume");
     setActionError(null);
     try {
-      await api.uploadResume(file);
+      await api.uploadResume(file, source);
       await Promise.all([refresh(), reloadIntegrations()]);
     } catch (cause) {
       setActionError(cause instanceof Error ? cause.message : "Something went wrong.");

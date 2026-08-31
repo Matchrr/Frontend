@@ -20,6 +20,7 @@ import { useAuth } from "@/components/AuthProvider";
 import { ProfileProvider, useProfile } from "@/components/ProfileProvider";
 import { Button, ButtonLink, LiveDot, Reveal, cx } from "@/components/ui";
 import { api } from "@/lib/api";
+import { isAuthPage } from "@/lib/session";
 import { relativeTime } from "@/lib/format";
 import { NAV_GROUPS, findNavItem } from "@/lib/nav";
 import type { Overview } from "@/lib/types";
@@ -461,14 +462,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, ready, required } = useAuth();
-  const isLogin = pathname === "/login";
+  const isAuthRoute = isAuthPage(pathname);
 
   useEffect(() => {
-    if (!ready || isLogin) return;
+    if (!ready || isAuthRoute) return;
     if (required && !user) router.replace("/login");
-  }, [ready, required, user, isLogin, router]);
+  }, [ready, required, user, isAuthRoute, router]);
 
-  if (isLogin) {
+  if (isAuthRoute) {
     return <>{children}</>;
   }
 

@@ -53,7 +53,7 @@ export function GroundingWizard({
   onClose: () => void;
   onComplete: () => void;
   onConnectLinkedin: () => Promise<void>;
-  onUpload: (file: File) => Promise<void>;
+  onUpload: (file: File, source?: DocumentSource) => Promise<void>;
   onSkipLinkedin: () => void;
 }) {
   const titleId = useId();
@@ -139,7 +139,7 @@ export function GroundingWizard({
   async function handleUpload(file: File | undefined) {
     if (!file || busy !== null) return;
     try {
-      await onUpload(file);
+      await onUpload(file, source ?? "resume");
       setPhase("success");
     } catch {
       /* parent sets error */

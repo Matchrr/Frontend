@@ -321,7 +321,7 @@ export function MatchingWizard({
             want to work — location type, pay floor, and job type.
           </p>
 
-          <p className="mt-4 text-xs font-medium text-zinc-700">How many to rank</p>
+          <p className="mt-4 text-xs font-medium text-zinc-700">How many roles to return</p>
           <SegmentedTabs
             className="mt-1.5 w-full [&_button]:flex-1 [&_button]:justify-center"
             items={LIMITS.map((option) => ({
@@ -332,7 +332,7 @@ export function MatchingWizard({
             onChange={(value) => setLimit(Number(value) as MatchLimit)}
           />
           <p className="mt-1.5 text-xs text-zinc-500">
-            {LIMITS.find((option) => option.value === limit)?.hint}. You can target up to 5 afterward.
+            Exactly {limit} ranked roles, best first. You can target up to 5 afterward.
           </p>
 
           <p className="mt-4 text-xs font-medium text-zinc-700">Desired roles</p>
